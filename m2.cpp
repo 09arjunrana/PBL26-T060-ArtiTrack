@@ -27,6 +27,18 @@ public:
 
     const string& getId() const { return id; }
 
+    // Read-only access for Module 3 (search, sorting, reports)
+    const string& getName() const { return name; }
+    int getAge() const { return estimatedAge; }
+    double getCondition() const { return conditionScore; }
+    const string& getLocation() const { return currentLocation; }
+
+    // Type label used by Module 3's "filter by type"
+    virtual string typeName() const { return "Artifact"; }
+
+    // Module 3's report table prints one row per artifact (defined in m4.cpp)
+    friend void printReportRow(ostream& out, const Artifact& a);
+
     virtual double calculatePriority() const {
         return (10.0 - conditionScore) * 4.0 + (estimatedAge / 100.0) * 1.5;
     }
@@ -57,6 +69,8 @@ public:
         return baseScore + porosityPenalty;
     }
 
+    string typeName() const override { return "Pottery"; }
+
     void display() const override {
         Artifact::display();
         cout << "  Type: Pottery | Porosity: " << porosityIndex << "\n";
@@ -82,6 +96,8 @@ public:
             baseScore += 12.0;
         return baseScore;
     }
+
+    string typeName() const override { return "Coin"; }
 
     void display() const override {
         Artifact::display();
@@ -109,6 +125,8 @@ public:
         coinScore += (dynasty == "Maurya" || dynasty == "Gupta") ? 20.0 : 10.0;
         return coinScore;
     }
+
+    string typeName() const override { return "Ancient Coin"; }
 
     void display() const override {
         CoinArtifact::display();

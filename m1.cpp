@@ -4,6 +4,7 @@
 // so only m1.cpp is ever compiled directly.
 #include "m0.cpp"
 #include "m2.cpp"
+#include "m4.cpp"
 #include <iomanip>
 using namespace std;
 
@@ -59,6 +60,9 @@ public:
     }
 
     size_t size() const { return items.size(); }
+
+    // Read-only view of every artifact (used by Module 3: search, sorting, reports)
+    const vector<unique_ptr<Artifact>>& all() const { return items; }
 
     void displayAll() const
     {
@@ -154,17 +158,19 @@ void artifactMenu(const string& user)
              << "1. Add Artifact\n"
              << "2. Display All Artifacts\n"
              << "3. Search Artifact by ID\n"
-             << "4. Logout\n";
-        choice = readInt("Enter your choice: ", 1, 4);
+             << "4. Search, Sort & Reports\n"
+             << "5. Logout\n";
+        choice = readInt("Enter your choice: ", 1, 5);
 
         switch (choice)
         {
             case 1: addArtifact(store);    break;
             case 2: store.displayAll();    break;
             case 3: searchArtifact(store); break;
-            case 4: cout << "Logged out.\n"; break;
+            case 4: searchAnalyticsMenu(store.all()); break;
+            case 5: cout << "Logged out.\n"; break;
         }
-    } while (choice != 4);
+    } while (choice != 5);
 }
 
 // ---------- Hub ----------
