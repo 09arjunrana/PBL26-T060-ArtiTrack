@@ -48,6 +48,33 @@ string fixed2(double v)
     return os.str();
 }
 
+// ---------- Data file helpers ----------
+// Shared by network.txt and movements.txt. A missing file is normal (nothing saved
+// yet) and returns false; a file that exists but cannot be read throws.
+bool openDataFile(const string& file, ifstream& in)
+{
+    error_code ec;   // makes the filesystem checks report failure instead of throwing
+    if (!filesystem::exists(file, ec)) return false;
+    if (!filesystem::is_regular_file(file, ec)) throw FileAccessException(file, "read");
+    in.open(file);
+    if (!in.is_open()) throw FileAccessException(file, "read");
+    return true;
+}
+
+// Split one line on '|', the field separator in every ArtiTrack save file
+vector<string> splitFields(const string& line)
+{
+    vector<string> f;
+    string cur;
+    for (char c : line)
+    {
+        if (c == '|') { f.push_back(cur); cur.clear(); }
+        else cur += c;
+    }
+    f.push_back(cur);
+    return f;
+}
+
 // ---------- Hash index (fast lookup by ID) ----------
 // Problem: ArtifactStore::find scans every artifact, O(n) per lookup. A hash table
 // jumps straight to one short bucket, O(1) on average, so "find #4471" stays instant
@@ -384,15 +411,64 @@ public:
     }
 };
 
-// ---------- Movement frequency (waits on Module 2) ----------
-// The movement log is not built yet, so this takes ready-made counts
-// (artifact ID -> number of moves) instead of guessing at a file format.
+// ---------- Movement log (read-only) ----------
+// Module 2 (Movement) writes movements.txt; Module 3 only reads it, to count moves per
+// artifact and to turn real transfers into network routes. One move per line, no
+// header, '|' separated like artifacts.txt (fields from requirement FR-3):
+//     ARTIFACT_ID|FROM|TO|DATE|AUTHORIZED_BY|REASON
+// TODO(integration): Module 2 -- this format is our proposal; confirm it with Saini.
+const char* MOVEMENT_FILE = "movements.txt";
+const size_t MOVEMENT_FIELDS = 6;
+
+struct MovementRecord {
+    string artifactId, from, to, date, authorizedBy, reason;
+};
+
+// A missing file just means no moves are recorded yet. Malformed lines (wrong number
+// of fields, blank ID / FROM / TO, or FROM == TO) are skipped with a warning, the same
+// way m1 handles a bad line in artifacts.txt.
+vector<MovementRecord> loadMovements(const string& file = MOVEMENT_FILE)
+{
+    vector<MovementRecord> moves;
+    ifstream in;
+    if (!openDataFile(file, in)) return moves;   // throws FileAccessException if unreadable
+
+    string line;
+    int skipped = 0;
+    while (getline(in, line))
+    {
+        if (!line.empty() && line.back() == '\r') line.pop_back();   // file saved with Windows line endings
+        if (line.empty()) continue;
+        vector<string> f = splitFields(line);
+        if (f.size() != MOVEMENT_FIELDS || f[0].empty() || f[1].empty() || f[2].empty() || f[1] == f[2])
+        {
+            skipped++;
+            continue;
+        }
+        moves.push_back({f[0], f[1], f[2], f[3], f[4], f[5]});
+    }
+    if (in.bad()) throw FileAccessException(file, "read");
+    if (skipped > 0)
+        cout << "Warning: skipped " << skipped << " malformed line(s) in " << file << ".\n";
+    return moves;
+}
+
+map<string, int> countMovesPerArtifact(const vector<MovementRecord>& moves)
+{
+    map<string, int> counts;
+    for (const MovementRecord& m : moves) counts[m.artifactId]++;   // a new key starts at 0
+    return counts;
+}
+
+// ---------- Movement frequency report ----------
+// Takes ready-made counts (artifact ID -> number of moves), so it does not depend on
+// where the counts came from.
 void movementFrequencyReport(const map<string, int>& movesPerArtifact)
 {
     cout << "\n===== Movement Frequency Report =====\n";
     if (movesPerArtifact.empty())
     {
-        cout << "No movements recorded.\n";
+        cout << "No movements recorded yet (" << MOVEMENT_FILE << " is missing or empty).\n";
         return;
     }
 
@@ -461,12 +537,8 @@ public:
     // first run; a file that exists but cannot be read throws FileAccessException.
     void load()
     {
-        error_code ec;   // makes the filesystem checks report failure instead of throwing
-        if (!filesystem::exists(filename, ec)) return;
-        if (!filesystem::is_regular_file(filename, ec)) throw FileAccessException(filename, "read");
-
-        ifstream in(filename);
-        if (!in.is_open()) throw FileAccessException(filename, "read");
+        ifstream in;
+        if (!openDataFile(filename, in)) return;
 
         string line;
         int skipped = 0;
@@ -474,14 +546,13 @@ public:
         {
             if (!line.empty() && line.back() == '\r') line.pop_back();   // file saved with Windows line endings
             if (line.empty()) continue;
-            size_t bar = line.find('|');
-            if (bar == string::npos || bar == 0 || bar == line.size() - 1 ||
-                line.find('|', bar + 1) != string::npos)
+            vector<string> f = splitFields(line);
+            if (f.size() != 2 || f[0].empty() || f[1].empty())
             {
                 skipped++;
                 continue;
             }
-            connect(line.substr(0, bar), line.substr(bar + 1));
+            connect(f[0], f[1]);
         }
         if (in.bad()) throw FileAccessException(filename, "read");
         if (skipped > 0)
@@ -501,12 +572,11 @@ public:
         return connect(a, b);
     }
 
-    // TODO(integration): Module 2 -- pass (from, to) location pairs from the movement
-    // records here so every real transfer becomes a route. Kept in memory only, because
-    // the movement log already saves those transfers.
-    void addEdgesFromMovements(const vector<pair<string, string>>& transfers)
+    // Every recorded transfer becomes a route between its two sites. Kept in memory
+    // only (not written to network.txt), because movements.txt already saves them.
+    void addEdgesFromMovements(const vector<MovementRecord>& moves)
     {
-        for (const auto& t : transfers) connect(t.first, t.second);
+        for (const MovementRecord& m : moves) connect(m.from, m.to);
     }
 
     // BFS explores sites in rings of 1, 2, 3... transfers, so the first time it reaches
@@ -647,12 +717,7 @@ void reportsMenu(const SearchAnalytics& sa)
 
     if (report == 1) sa.urgentCareReport();
     else if (report == 2) sa.riskyStorageReport();
-    else
-    {
-        // TODO(integration): Module 2 -- count moves per artifact ID from the movement
-        // log and call movementFrequencyReport(counts) here.
-        cout << "Movement data not available yet (waiting on Module 2: Movement tracking).\n";
-    }
+    else movementFrequencyReport(countMovesPerArtifact(loadMovements()));
 }
 
 void printRoute(const vector<string>& path)
@@ -662,12 +727,14 @@ void printRoute(const vector<string>& path)
     cout << "\n";
 }
 
-// Sites come from the artifacts' locations plus the connections saved in network.txt
+// Sites come from the artifacts' locations, the connections saved in network.txt,
+// and the transfers recorded in movements.txt
 void networkMenu(const vector<unique_ptr<Artifact>>& items)
 {
     LocationNetwork net;
     net.addSitesFrom(items);
-    net.load();   // throws FileAccessException if network.txt exists but cannot be read
+    net.load();                                  // throws FileAccessException if network.txt is unreadable
+    net.addEdgesFromMovements(loadMovements());  // same for movements.txt
 
     int choice;
     do
