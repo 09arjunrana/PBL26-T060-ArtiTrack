@@ -26,6 +26,9 @@ public:
     virtual ~Artifact() {}
 
     const string& getId() const { return id; }
+    const string& getName() const { return name; }
+    const string& getLocation() const { return currentLocation; }
+    void setLocation(const string& loc) { currentLocation = loc; }   // used by Module 4
 
     virtual double calculatePriority() const {
         return (10.0 - conditionScore) * 4.0 + (estimatedAge / 100.0) * 1.5;

@@ -1,10 +1,16 @@
 // m1.cpp - CENTRAL HUB: login -> artifact menu (this is the ONLY file with main)
-// Build:  g++ -std=c++17 -Wall m1.cpp -o artitrack
-// m0.cpp (login) and m2.cpp (classes) are pulled in by the #includes below,
-// so only m1.cpp is ever compiled directly.
+// Build (2 steps - m4.c is PURE C, so it must be compiled with gcc, not g++):
+//   gcc -std=c11 -Wall -Wextra -c m4.c -o m4.o
+//   g++ -std=c++17 -Wall -Wextra m1.cpp m4.o -o artitrack
+// m0.cpp (login) and m2.cpp (classes) are pulled in by #includes;
+// m4.c (movement tracking, C) is linked in as m4.o and talks to this file
+// through the small bridge_* functions below (declared in m4.h).
 #include "m0.cpp"
 #include "m2.cpp"
+#include "m4.h"      // C interface of Module 4 (m4.c)
 #include <iomanip>
+#include <cstdio>
+#include <cstring>
 using namespace std;
 
 // ================== Saving / loading ==================
@@ -12,6 +18,21 @@ class ArtifactStore {
 private:
     string filename;
     vector<unique_ptr<Artifact>> items;
+
+    // Rewrites the whole save file (write to a temp file, then swap it in)
+    bool saveAll() const
+    {
+        string tmp = filename + ".tmp";
+        {
+            ofstream out(tmp, ios::trunc);
+            if (!out.is_open()) return false;
+            for (const auto& a : items) out << a->serialize() << "\n";
+            out.flush();
+            if (!out) return false;
+        }
+        std::remove(filename.c_str());
+        return std::rename(tmp.c_str(), filename.c_str()) == 0;
+    }
 
 public:
     explicit ArtifactStore(const string& file = "artifacts.txt") : filename(file) {}
@@ -33,8 +54,19 @@ public:
             else skipped++;
         }
         if (skipped > 0)
+        {
             cout << "Warning: skipped " << skipped
                  << " unreadable or duplicate line(s) in " << filename << ".\n";
+            // Module 4 rewrites the whole file, which would erase those lines,
+            // so keep a copy of the original first.
+            ifstream src(filename, ios::binary);
+            ofstream bak(filename + ".bak", ios::binary | ios::trunc);
+            if (src && bak)
+            {
+                bak << src.rdbuf();
+                cout << "A backup was saved as " << filename << ".bak\n";
+            }
+        }
     }
 
     bool exists(const string& id) const { return find(id) != nullptr; }
@@ -58,6 +90,27 @@ public:
         return true;
     }
 
+    // ---- used by Module 4 (movement tracking) ----
+    Artifact* findMutable(const string& id)
+    {
+        for (auto& a : items)
+            if (a->getId() == id) return a.get();
+        return nullptr;
+    }
+
+    // Changes an artifact's location in memory AND on disk.
+    // If the save fails the old location is restored and false is returned.
+    bool updateLocation(const string& id, const string& newLoc)
+    {
+        Artifact* a = findMutable(id);
+        if (!a) return false;
+        string oldLoc = a->getLocation();
+        a->setLocation(newLoc);
+        if (saveAll()) return true;
+        a->setLocation(oldLoc);
+        return false;
+    }
+
     size_t size() const { return items.size(); }
 
     void displayAll() const
@@ -77,6 +130,28 @@ public:
         }
     }
 };
+
+// ---------- Bridge for Module 4 (m4.c is pure C and cannot see ArtifactStore) ----------
+// artifactMenu() points g_store at its store while the movement menu is open.
+static ArtifactStore* g_store = nullptr;
+
+extern "C" int bridge_findArtifact(const char* id,
+                                   char* name, size_t nameSize,
+                                   char* location, size_t locationSize)
+{
+    if (!g_store) return 0;
+    const Artifact* a = g_store->find(id);
+    if (!a) return 0;
+    snprintf(name, nameSize, "%s", a->getName().c_str());
+    snprintf(location, locationSize, "%s", a->getLocation().c_str());
+    return 1;
+}
+
+extern "C" int bridge_updateLocation(const char* id, const char* newLocation)
+{
+    if (!g_store) return 0;
+    return g_store->updateLocation(id, newLocation) ? 1 : 0;
+}
 
 // ---------- Artifact entry ----------
 void addArtifact(ArtifactStore& store)
@@ -138,7 +213,7 @@ void searchArtifact(const ArtifactStore& store)
     cout << "  Priority score: " << a->calculatePriority() << "\n";
 }
 
-// ---------- Module 2 entry point (after login) ----------
+// ---------- Artifact menu (after login) ----------
 void artifactMenu(const string& user)
 {
     ArtifactStore store;
@@ -154,17 +229,23 @@ void artifactMenu(const string& user)
              << "1. Add Artifact\n"
              << "2. Display All Artifacts\n"
              << "3. Search Artifact by ID\n"
-             << "4. Logout\n";
-        choice = readInt("Enter your choice: ", 1, 4);
+             << "4. Track Artifact Movement\n"
+             << "5. Logout\n";
+        choice = readInt("Enter your choice: ", 1, 5);
 
         switch (choice)
         {
             case 1: addArtifact(store);    break;
             case 2: store.displayAll();    break;
             case 3: searchArtifact(store); break;
-            case 4: cout << "Logged out.\n"; break;
+            case 4:
+                g_store = &store;
+                movementMenu(user.c_str());
+                g_store = nullptr;
+                break;
+            case 5: cout << "Logged out.\n"; break;
         }
-    } while (choice != 4);
+    } while (choice != 5);
 }
 
 // ---------- Hub ----------
