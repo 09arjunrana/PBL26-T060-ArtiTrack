@@ -7,11 +7,7 @@
 // through the small bridge_* functions below (declared in m4.h).
 #include "m0.cpp"
 #include "m2.cpp"
-<<<<<<< HEAD
 #include "m4.h"      // C interface of Module 4 (m4.c)
-=======
-#include "m4.cpp"
->>>>>>> c13ae5038c40f841618ca2d7e340ae8812541ea0
 #include <iomanip>
 #include <cstdio>
 #include <cstring>
@@ -116,9 +112,6 @@ public:
     }
 
     size_t size() const { return items.size(); }
-
-    // Read-only view of every artifact (used by Module 3: search, sorting, reports)
-    const vector<unique_ptr<Artifact>>& all() const { return items; }
 
     void displayAll() const
     {
@@ -236,11 +229,7 @@ void artifactMenu(const string& user)
              << "1. Add Artifact\n"
              << "2. Display All Artifacts\n"
              << "3. Search Artifact by ID\n"
-<<<<<<< HEAD
              << "4. Track Artifact Movement\n"
-=======
-             << "4. Search, Sort & Reports\n"
->>>>>>> c13ae5038c40f841618ca2d7e340ae8812541ea0
              << "5. Logout\n";
         choice = readInt("Enter your choice: ", 1, 5);
 
@@ -249,15 +238,11 @@ void artifactMenu(const string& user)
             case 1: addArtifact(store);    break;
             case 2: store.displayAll();    break;
             case 3: searchArtifact(store); break;
-<<<<<<< HEAD
             case 4:
                 g_store = &store;
                 movementMenu(user.c_str());
                 g_store = nullptr;
                 break;
-=======
-            case 4: searchAnalyticsMenu(store.all()); break;
->>>>>>> c13ae5038c40f841618ca2d7e340ae8812541ea0
             case 5: cout << "Logged out.\n"; break;
         }
     } while (choice != 5);
