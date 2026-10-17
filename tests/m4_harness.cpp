@@ -236,49 +236,14 @@ void checkGraph()
     check(net.reachableFrom("C").size() == 4, "DFS from C reaches A, B, C, D");
     check(net.clusterCount() == 3, "3 clusters: {A,B,C,D}, {E,F}, {G}");
 
-    net.addEdgesFromMovements({{"X1", "D", "E", "2026-10-01", "Curator", "Loan"},
-                               {"X2", "F", "G", "2026-10-02", "Curator", "Loan"}});
-    check(net.clusterCount() == 1, "movement routes join everything into 1 cluster");
+    net.addEdgesFromMovements({{"D", "E"}, {"F", "G"}});
+    check(net.clusterCount() == 1, "movement hook joins everything into 1 cluster");
     check(net.shortestPath("A", "G").size() == 5, "after hook, A->G is A-D-E-F-G (4 transfers)");
 }
 
-void checkMovementLog()
+void checkMovementReport()
 {
-    cout << "\n[7] Movement log (movements.txt) and frequency report\n";
-
-    vector<MovementRecord> none = loadMovements("no_movements_here.txt");
-    check(none.empty(), "missing movements file -> no moves, no exception");
-
-    // Binary mode so the "\r\n" line really reaches the file on Windows too
-    ofstream out("harness_movements.txt", ios::binary);
-    out << "PT01|Delhi Museum|Dehradun Lab|2026-10-01|Dr Rao|Restoration\n"
-        << "A001|Patna Vault|Delhi Museum|2026-10-04|Curator|Exhibition\r\n"   // Windows line ending
-        << "A001|Delhi Museum|Patna Vault|2026-10-11|Curator|Exhibition ended\n"
-        << "\n"                                                              // blank line: ignored
-        << "C002|Store Room B|Patna Vault\n"                                 // too few fields
-        << "C003|Delhi Museum|Delhi Museum|2026-10-15|Curator|Same site\n"    // FROM == TO
-        << "|Delhi Museum|Patna Vault|2026-10-15|Curator|No ID\n"             // blank ID
-        << "PT01|Dehradun Lab|Delhi Museum|2026-10-09|Dr Rao|Returned\n";
-    out.close();
-
-    vector<MovementRecord> moves = loadMovements("harness_movements.txt");
-    check(moves.size() == 4, "4 valid moves read, 3 malformed lines skipped, got " + to_string(moves.size()));
-    check(moves.size() > 1 && moves[1].reason == "Exhibition", "trailing \\r removed from a Windows line");
-
-    map<string, int> counts = countMovesPerArtifact(moves);
-    check(counts.size() == 2 && counts["A001"] == 2 && counts["PT01"] == 2, "counts: A001 2, PT01 2");
-
-    LocationNetwork net("unused_network.txt");
-    net.addEdgesFromMovements(moves);
-    check(net.shortestPath("Dehradun Lab", "Patna Vault").size() == 3,
-          "movement routes give Dehradun Lab -> Delhi Museum -> Patna Vault");
-
-    filesystem::create_directory("movements_is_a_folder");
-    try { loadMovements("movements_is_a_folder"); check(false, "unreadable movements file throws"); }
-    catch (const FileAccessException& e) { check(true, string("unreadable movements file -> FileAccessException: ") + e.what()); }
-
-    movementFrequencyReport(counts);
-    cout << "  (expect A001 2 then PT01 2: a tie stays in ID order)\n";
+    cout << "\n[7] Movement frequency report (sample counts until Module 2 exists)\n";
     movementFrequencyReport({{"A001", 3}, {"C002", 7}, {"G001", 3}, {"PT01", 1}, {"C001", 7}});
     cout << "  (expect C001 7, C002 7, A001 3, G001 3, PT01 1: ties stay in ID order)\n";
     movementFrequencyReport({});
@@ -304,7 +269,7 @@ int main()
     checkStoreUntouched(store, before);
     checkExceptions(store);
     checkGraph();
-    checkMovementLog();
+    checkMovementReport();
 
     cout << "\n===== " << passed << " passed, " << failed << " failed =====\n";
     return failed == 0 ? 0 : 1;

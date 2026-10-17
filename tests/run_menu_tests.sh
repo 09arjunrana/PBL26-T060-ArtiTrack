@@ -23,8 +23,8 @@ if [ -z "${BASELINE_BIN:-}" ]; then
     g++ -std=c++17 -Wall -Wextra baseline/m1.cpp -o baseline/artitrack || exit 1
 fi
 
-reset_data() {   # starts with no movements.txt; scenarios that need it copy it in
-    rm -rf network.txt movements.txt
+reset_data() {
+    rm -rf network.txt
     cp "$REPO/tests/test_artifacts.txt" artifacts.txt
     cp "$REPO/tests/test_network.txt" network.txt
     printf 'tester pass1\n' > users.txt
@@ -170,47 +170,22 @@ Field Camp
 EOF
 cp network.txt network_after.txt
 
-echo "== Scenario: movements.txt present (frequency report + routes in the network)"
+echo "== Scenario: network.txt cannot be read (a folder in its place)"
 reset_data
-cp "$REPO/tests/test_movements.txt" movements.txt
-run movements <<'EOF'
-2
-tester
-pass1
-4
-4
-3
-5
-1
-3
-Field Camp
-Kolkata Annex
-4
-Field Camp
-5
-6
-5
-3
-EOF
-
-echo "== Scenario: network.txt and movements.txt cannot be read (folders in their place)"
-reset_data
-rm -f network.txt && mkdir network.txt movements.txt
+rm -f network.txt && mkdir network.txt
 run file_error <<'EOF'
 2
 tester
 pass1
 4
 5
-4
-3
 1
 PT01
 6
 5
 3
 EOF
-rm -rf network.txt movements.txt
+rm -rf network.txt
 
 echo "== Scenario: empty collection (no artifacts.txt)"
 reset_data
@@ -229,8 +204,6 @@ X1
 1
 4
 2
-4
-3
 5
 1
 5
@@ -255,6 +228,6 @@ cmp -s regression_main_artifacts.txt regression_new_artifacts.txt && echo "   ar
 cmp -s regression_main_users.txt regression_new_users.txt && echo "   users.txt after the run: identical"
 
 echo "== Harness"
-rm -rf net_is_a_folder movements_is_a_folder graph_test.txt harness_artifacts.txt harness_movements.txt
+rm -rf net_is_a_folder graph_test.txt harness_artifacts.txt
 ./m4_harness > harness.log
 echo "   exit code $? -> harness.log ($(tail -1 harness.log))"

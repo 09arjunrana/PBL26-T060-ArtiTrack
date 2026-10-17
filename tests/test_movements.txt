@@ -1,9 +1,0 @@
-PT01|Delhi Museum|Dehradun Lab|2026-10-01|Dr Rao|Restoration
-C002|Store Room B|Patna Vault|2026-10-03|Curator|Storage swap
-A001|Patna Vault|Delhi Museum|2026-10-04|Curator|Exhibition
-G003|Field Camp|Dehradun Lab|2026-10-05|Site lead|Cleaning
-PT01|Dehradun Lab|Delhi Museum|2026-10-09|Dr Rao|Returned after restoration
-A001|Delhi Museum|Patna Vault|2026-10-11|Curator|Exhibition ended
-A001|Patna Vault|Kolkata Annex|2026-10-14|Director|Loan
-C002|Patna Vault|Store Room B
-C003|Delhi Museum|Delhi Museum|2026-10-15|Curator|Not a real move

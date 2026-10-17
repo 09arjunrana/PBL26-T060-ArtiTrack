@@ -37,14 +37,11 @@ answer read-only questions about the collection.
 hash lookup **12.4 ns** vs linear **5,664 ns** (about 457× faster). The index went 17 → 9,215 buckets over
 9 rehashes, final load factor 0.54, longest chain 2. Rebuild 0.58 ms. Merge sort of 5,000 by priority:
 0.92 ms (`std::stable_sort` 0.85 ms). For every key and both directions, the output is sorted and identical to
-`std::stable_sort`, which proves stability. 38/38 checks pass.
+`std::stable_sort`, which proves stability. 32/32 checks pass.
 
-**Movement data.** Module 3 *reads* `movements.txt` (Module 2 writes it), one move per line:
-`ARTIFACT_ID|FROM|TO|DATE|AUTHORIZED_BY|REASON` (fields from FR-3). `loadMovements` → `countMovesPerArtifact`
-(a `map`, O(m log k) for m moves and k artifacts) → `movementFrequencyReport` (merge sort, most-moved first, ties in
-ID order). The same records become network routes via `addEdgesFromMovements`. A missing file means "no moves yet";
-malformed lines are skipped with a warning; an unreadable file throws `FileAccessException`.
-**This format is our proposal; it must be confirmed with Saini** (`TODO(integration): Module 2`).
+**Waiting on teammates.** Movement frequency: `movementFrequencyReport(map<ID, moves>)` is written and tested,
+but the menu says "Movement data not available yet" until Module 2's log exists (`TODO(integration): Module 2`).
+Graph hook: `LocationNetwork::addEdgesFromMovements(from/to pairs)`.
 
 **Known gap.** The Phase-I slide lists **BST/AVL (U3)** under M3; this version does not implement one.
 A BST keyed on age would serve the era and range filters in O(log n + k).
