@@ -1,5 +1,0 @@
-Delhi Museum|Store Room B
-Store Room B|Dehradun Lab
-Delhi Museum|Patna Vault
-Patna Vault|Kolkata Annex
-this line has no separator
