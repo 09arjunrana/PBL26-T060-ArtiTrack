@@ -1,7 +1,16 @@
-/* m4.c - Module 4: Artifact movement tracking  (PURE C - compile with gcc)
+/* m4.c - Module 4: Artifact movement tracking and restoration queue (PURE C - compile with gcc)
  *
- * Data structure: singly linked list (head + tail pointers) of movement records.
- * Every move is also appended to movements.txt so history survives restarts.
+ * Data structures (and why):
+ *   - singly linked list (head + tail) of movement records: moves are only ever appended
+ *     and read oldest-first, so a list needs no resizing and appends in O(1).
+ *     Every move is also appended to movements.txt so history survives restarts.
+ *   - stack (linked) of this session's moves: "undo" must reverse the MOST RECENT move
+ *     first, which is exactly last-in-first-out.
+ *   - binary max-heap of restoration priorities: "which artifact should be restored next?"
+ *     needs the biggest score again and again; a heap gives it in O(log n) per pop,
+ *     cheaper than re-sorting everything each time.
+ *
+ * movements.txt line format (read by m3.cpp too):  MOVE|id|from|to|user|reason|timestamp
  *
  * Build:  gcc -std=c11 -Wall -Wextra -c m4.c -o m4.o
  */
@@ -292,6 +301,122 @@ static int sameText(const char* a, const char* b)
     return 1;
 }
 
+/* ===================== Undo stack (this session's moves) ===================== */
+typedef struct UndoNode {
+    char id[ID_LEN];
+    char from[LOC_LEN];
+    char to[LOC_LEN];
+    struct UndoNode* next;
+} UndoNode;
+
+static UndoNode* undoTop = NULL;
+static int undoCleanupRegistered = 0;
+
+static void undo_free(void)
+{
+    while (undoTop != NULL) {
+        UndoNode* next = undoTop->next;
+        free(undoTop);
+        undoTop = next;
+    }
+}
+
+static int undo_push(const char* id, const char* from, const char* to)
+{
+    UndoNode* n = (UndoNode*)malloc(sizeof(UndoNode));
+    if (n == NULL) return 0;
+    strcpy(n->id, id);                       /* lengths were already checked by log_record */
+    strcpy(n->from, from);
+    strcpy(n->to, to);
+    n->next = undoTop;                       /* push on top: O(1) */
+    undoTop = n;
+    if (!undoCleanupRegistered) {            /* hand the nodes back when the program ends */
+        atexit(undo_free);
+        undoCleanupRegistered = 1;
+    }
+    return 1;
+}
+
+static void undo_pop(void)
+{
+    UndoNode* top = undoTop;
+    if (top == NULL) return;
+    undoTop = top->next;
+    free(top);
+}
+
+/* ===================== Restoration priority queue (binary max-heap) ===================== */
+typedef struct {
+    char   id[ID_LEN];
+    char   name[NAME_LEN];
+    double priority;
+    int    seq;                              /* original position: breaks ties so output is repeatable */
+} RestoreItem;
+
+typedef struct {
+    RestoreItem* items;
+    int size;
+    int capacity;
+} RestoreHeap;
+
+/* 1 if x must be restored before y: higher score first, earlier position first on a tie */
+static int moreUrgent(const RestoreItem* x, const RestoreItem* y)
+{
+    if (x->priority != y->priority) return x->priority > y->priority;
+    return x->seq < y->seq;
+}
+
+static int heap_init(RestoreHeap* h, int capacity)
+{
+    h->items = (RestoreItem*)malloc((size_t)capacity * sizeof(RestoreItem));
+    h->size = 0;
+    h->capacity = h->items ? capacity : 0;
+    return h->items != NULL;
+}
+
+static void heap_free(RestoreHeap* h)
+{
+    free(h->items);
+    h->items = NULL;
+    h->size = h->capacity = 0;
+}
+
+/* Insert at the end, then swap upward while it beats its parent: O(log n) */
+static int heap_push(RestoreHeap* h, const RestoreItem* item)
+{
+    int i;
+    if (h->size == h->capacity) return 0;
+    i = h->size++;
+    h->items[i] = *item;
+    while (i > 0) {
+        int parent = (i - 1) / 2;
+        RestoreItem tmp;
+        if (!moreUrgent(&h->items[i], &h->items[parent])) break;
+        tmp = h->items[i]; h->items[i] = h->items[parent]; h->items[parent] = tmp;
+        i = parent;
+    }
+    return 1;
+}
+
+/* Take the root (most urgent), move the last item to the root, sink it: O(log n) */
+static int heap_pop(RestoreHeap* h, RestoreItem* out)
+{
+    int i = 0;
+    if (h->size == 0) return 0;
+    *out = h->items[0];
+    h->items[0] = h->items[--h->size];
+    for (;;) {
+        int left = 2 * i + 1, right = left + 1, best = i;
+        RestoreItem tmp;
+        if (left < h->size && moreUrgent(&h->items[left], &h->items[best])) best = left;
+        if (right < h->size && moreUrgent(&h->items[right], &h->items[best])) best = right;
+        if (best == i) break;
+        tmp = h->items[i]; h->items[i] = h->items[best]; h->items[best] = tmp;
+        i = best;
+    }
+    return 1;
+}
+
 /* ===================== Menu actions ===================== */
 static void moveArtifact(MovementList* log, const char* user)
 {
@@ -333,6 +458,8 @@ static void moveArtifact(MovementList* log, const char* user)
 
     printf("Moved %s (%s) from \"%s\" to \"%s\". Movement logged.\n",
            name, id, oldLoc, newLoc);
+    if (!undo_push(id, oldLoc, newLoc))
+        printf("(Note: not enough memory to remember this move for Undo.)\n");
 }
 
 static void viewHistory(const MovementList* log)
@@ -348,6 +475,92 @@ static void viewHistory(const MovementList* log)
     list_printHistory(log, id);
 }
 
+/* Reverses the most recent move made in this program run. The reversal is itself logged
+ * (history is never erased), but is not pushed on the stack, so Undo steps back one move
+ * at a time instead of bouncing between two locations. */
+static void undoLastMove(MovementList* log, const char* user)
+{
+    char name[NAME_LEN], cur[LOC_LEN], reason[REASON_LEN], ts[TS_LEN];
+    UndoNode* top = undoTop;
+
+    if (top == NULL) {
+        printf("Nothing to undo: no artifact has been moved in this session.\n");
+        return;
+    }
+    if (!bridge_findArtifact(top->id, name, sizeof(name), cur, sizeof(cur))) {
+        printf("%s no longer exists. That entry was dropped from the undo stack.\n", top->id);
+        undo_pop();
+        return;
+    }
+    if (!sameText(cur, top->to)) {
+        printf("%s is no longer at \"%s\" (it is at \"%s\"), so the move cannot be undone safely.\n"
+               "That entry was dropped from the undo stack.\n", top->id, top->to, cur);
+        undo_pop();
+        return;
+    }
+
+    printf("\nLast move: %s (%s)  \"%s\"  ->  \"%s\"\n", name, top->id, top->from, top->to);
+    if (readIntC("Undo it? (1 = yes, 2 = no): ", 1, 2) == 2) {
+        printf("Undo cancelled.\n");
+        return;
+    }
+
+    if (!bridge_updateLocation(top->id, top->from)) {
+        printf("ERROR: could not update the artifact save file. Nothing was changed.\n");
+        return;
+    }
+    snprintf(reason, sizeof(reason), "UNDO of move to %s", top->to);
+    currentTimestamp(ts, sizeof(ts));
+    if (!log_record(log, top->id, top->to, top->from, user, reason, ts)) {
+        if (bridge_updateLocation(top->id, top->to))
+            printf("ERROR: could not write the movement log. Undo cancelled.\n");
+        else
+            printf("ERROR: could not write the movement log AND could not restore the location.\n"
+                   "       %s is now at \"%s\" but the undo is not logged.\n", top->id, top->from);
+        return;
+    }
+    printf("Undone: %s is back at \"%s\". The reversal was logged.\n", top->id, top->from);
+    undo_pop();
+}
+
+/* Builds a max-heap of every artifact's priority score, then pops the top few */
+static void showRestorationQueue(void)
+{
+    int total = bridge_artifactCount(), want, shown = 0, i;
+    RestoreHeap heap;
+    RestoreItem item;
+
+    printf("\n--- Restoration Priority Queue ---\n");
+    if (total <= 0) {
+        printf("No artifacts saved yet.\n");
+        return;
+    }
+    want = readIntC("How many artifacts to list (1-50): ", 1, 50);
+
+    if (!heap_init(&heap, total)) {
+        printf("ERROR: not enough memory.\n");
+        return;
+    }
+    for (i = 0; i < total; i++) {
+        item.seq = i;
+        if (!bridge_artifactAt(i, item.id, sizeof(item.id), item.name, sizeof(item.name), &item.priority))
+            continue;                               /* an ID or name too long for the buffers: skip it */
+        heap_push(&heap, &item);
+    }
+
+    printf("\nRestore in this order (highest priority score first):\n");
+    while (shown < want && heap_pop(&heap, &item)) {
+        char name[NAME_LEN], loc[LOC_LEN], advice[256];
+        shown++;
+        if (!bridge_findArtifact(item.id, name, sizeof(name), loc, sizeof(loc))) loc[0] = '\0';
+        printf("  %2d. %-8s %-22s priority %8.2f   at %s\n", shown, item.id, item.name, item.priority, loc);
+        if (bridge_restorationAdvice(item.id, advice, sizeof(advice)))
+            printf("      Advice: %s\n", advice);
+    }
+    if (shown == 0) printf("  (nothing to list)\n");
+    heap_free(&heap);
+}
+
 /* ===================== Module 4 entry point ===================== */
 void movementMenu(const char* user)
 {
@@ -358,20 +571,24 @@ void movementMenu(const char* user)
     log_load(&log);
 
     do {
-        printf("\n===== Movement Tracking =====\n"
+        printf("\n===== Movement & Restoration =====\n"
                "1. Move an Artifact\n"
                "2. View Movement History of an Artifact\n"
                "3. View Full Movement Log\n"
-               "4. Back to Artifact Menu\n");
-        choice = readIntC("Enter your choice: ", 1, 4);
+               "4. Undo Last Move (this session)\n"
+               "5. Restoration Priority Queue\n"
+               "6. Back to Artifact Menu\n");
+        choice = readIntC("Enter your choice: ", 1, 6);
 
         switch (choice) {
-            case 1: moveArtifact(&log, user); break;
-            case 2: viewHistory(&log);        break;
-            case 3: list_printAll(&log);      break;
-            case 4: break;
+            case 1: moveArtifact(&log, user);   break;
+            case 2: viewHistory(&log);          break;
+            case 3: list_printAll(&log);        break;
+            case 4: undoLastMove(&log, user);   break;
+            case 5: showRestorationQueue();     break;
+            case 6: break;
         }
-    } while (choice != 4);
+    } while (choice != 6);
 
     list_free(&log);                                /* give all nodes back */
 }

@@ -1,11 +1,21 @@
-// m4_harness.cpp - automated checks for Module 3 (NOT part of the app build)
-// Build (from the repo root): g++ -std=c++17 -Wall -Wextra -O2 tests/m4_harness.cpp -o m4_harness
+// m3_harness.cpp - automated checks for Module 3, the pure-C core, passwords and the class
+// hierarchy (NOT part of the app build).
+// Build (from the repo root):   make m3_harness
 // Run it from an empty scratch folder: it writes its own data files there.
-#define main artitrack_main   // reuse m1.cpp's ArtifactStore without its main()
-#include "../m1.cpp"
-#undef main
+#include "../m0.h"
+#include "../m1.h"
+#include "../m2.h"
+#include "../m3.h"
+#include "../m3_core.h"
+#include <algorithm>
 #include <chrono>
 #include <cstdint>
+#include <filesystem>
+#include <fstream>
+#include <iomanip>
+#include <iostream>
+#include <set>
+#include <sstream>
 using namespace std;
 
 // ---------- Tiny check framework ----------
@@ -236,8 +246,8 @@ void checkGraph()
     check(net.reachableFrom("C").size() == 4, "DFS from C reaches A, B, C, D");
     check(net.clusterCount() == 3, "3 clusters: {A,B,C,D}, {E,F}, {G}");
 
-    net.addEdgesFromMovements({{"X1", "D", "E", "2026-10-01", "Curator", "Loan"},
-                               {"X2", "F", "G", "2026-10-02", "Curator", "Loan"}});
+    net.addEdgesFromMovements({{"X1", "D", "E", "Curator", "Loan", "2026-10-01 09:00:00"},
+                               {"X2", "F", "G", "Curator", "Loan", "2026-10-02 09:00:00"}});
     check(net.clusterCount() == 1, "movement routes join everything into 1 cluster");
     check(net.shortestPath("A", "G").size() == 5, "after hook, A->G is A-D-E-F-G (4 transfers)");
 }
@@ -251,14 +261,15 @@ void checkMovementLog()
 
     // Binary mode so the "\r\n" line really reaches the file on Windows too
     ofstream out("harness_movements.txt", ios::binary);
-    out << "PT01|Delhi Museum|Dehradun Lab|2026-10-01|Dr Rao|Restoration\n"
-        << "A001|Patna Vault|Delhi Museum|2026-10-04|Curator|Exhibition\r\n"   // Windows line ending
-        << "A001|Delhi Museum|Patna Vault|2026-10-11|Curator|Exhibition ended\n"
-        << "\n"                                                              // blank line: ignored
-        << "C002|Store Room B|Patna Vault\n"                                 // too few fields
-        << "C003|Delhi Museum|Delhi Museum|2026-10-15|Curator|Same site\n"    // FROM == TO
-        << "|Delhi Museum|Patna Vault|2026-10-15|Curator|No ID\n"             // blank ID
-        << "PT01|Dehradun Lab|Delhi Museum|2026-10-09|Dr Rao|Returned\n";
+    // Exactly the format m4.c writes: MOVE|id|from|to|user|reason|timestamp
+    out << "MOVE|PT01|Delhi Museum|Dehradun Lab|Dr Rao|Restoration|2026-10-01 09:00:00\n"
+        << "MOVE|A001|Patna Vault|Delhi Museum|Curator|Exhibition|2026-10-04 10:00:00\r\n"   // Windows line ending
+        << "MOVE|A001|Delhi Museum|Patna Vault|Curator|Exhibition ended|2026-10-11 11:00:00\n"
+        << "\n"                                                                      // blank line: ignored
+        << "MOVE|C002|Store Room B|Patna Vault\n"                                    // too few fields
+        << "COPY|C003|Delhi Museum|Patna Vault|Curator|Wrong tag|2026-10-15 12:00:00\n" // not a MOVE line
+        << "MOVE||Delhi Museum|Patna Vault|Curator|No ID|2026-10-15 12:00:00\n"       // blank ID
+        << "MOVE|PT01|Dehradun Lab|Delhi Museum|Dr Rao|Returned|2026-10-09 13:00:00\n";
     out.close();
 
     vector<MovementRecord> moves = loadMovements("harness_movements.txt");
@@ -284,10 +295,172 @@ void checkMovementLog()
     movementFrequencyReport({});
 }
 
+// ---------- New checks: pure-C core used directly, hierarchy, passwords ----------
+struct Pair { int key; int original; };
+int comparePairs(const void* a, const void* b, void*)
+{
+    int x = static_cast<const Pair*>(a)->key, y = static_cast<const Pair*>(b)->key;
+    return x < y ? -1 : (x > y ? 1 : 0);
+}
+
+void checkPureCCore()
+{
+    cout << "\n[8] Pure-C core (m3_core.c) called directly\n";
+
+    // hash table
+    HashIndex h;
+    check(hi_init(&h) == 0, "hi_init succeeds");
+    int values[200];
+    bool allInserted = true;
+    for (int i = 0; i < 200; i++)
+    {
+        values[i] = i;
+        allInserted = allInserted && hi_insert(&h, ("K" + to_string(i)).c_str(), &values[i]) == HI_OK;
+    }
+    check(allInserted && h.count == 200, "200 keys inserted");
+    check(hi_loadFactor(&h) <= 0.75 && h.rehashes > 0, "load factor <= 0.75 after rehashing");
+    check(hi_insert(&h, "K7", &values[7]) == HI_DUPLICATE, "duplicate key rejected with HI_DUPLICATE");
+    check(hi_find(&h, "K42") == &values[42] && hi_find(&h, "nope") == nullptr, "find hits and misses");
+    hi_free(&h);
+
+    // merge sort: sorted + stable on a few thousand pairs with many equal keys
+    vector<Pair> v;
+    for (int i = 0; i < 3000; i++) v.push_back({(i * 7919) % 50, i});
+    check(merge_sort(v.data(), v.size(), sizeof(Pair), comparePairs, nullptr) == 0, "merge_sort returns 0");
+    bool sorted = true, stable = true;
+    for (size_t i = 1; i < v.size(); i++)
+    {
+        if (v[i - 1].key > v[i].key) sorted = false;
+        if (v[i - 1].key == v[i].key && v[i - 1].original > v[i].original) stable = false;
+    }
+    check(sorted, "merge_sort: output is in order");
+    check(stable, "merge_sort: equal keys keep their original order (stable)");
+    check(merge_sort(v.data(), 0, sizeof(Pair), comparePairs, nullptr) == 0 &&
+          merge_sort(v.data(), 1, sizeof(Pair), comparePairs, nullptr) == 0, "empty and 1-element arrays are fine");
+
+    // graph
+    Graph* g = graph_new();
+    graph_connect(g, "A", "B"); graph_connect(g, "B", "C"); graph_connect(g, "C", "D"); graph_connect(g, "A", "D");
+    graph_connect(g, "E", "F"); graph_addSite(g, "G");
+    check(graph_connect(g, "B", "A") == 0 && graph_connect(g, "A", "A") == 0, "graph rejects duplicate edge and self-loop");
+    int path[16];
+    int len = graph_shortestPath(g, graph_find(g, "B"), graph_find(g, "D"), path);
+    check(len == 3, "BFS B->D is 2 transfers");
+    check(graph_shortestPath(g, graph_find(g, "A"), graph_find(g, "E"), path) == 0, "BFS across clusters returns 0");
+    int order[16];
+    check(graph_dfsOrder(g, graph_find(g, "C"), order) == 4, "DFS from C reaches 4 sites");
+    check(graph_clusterCount(g) == 3, "3 clusters");
+    graph_free(g);
+}
+
+void checkHierarchyAndOperators()
+{
+    cout << "\n[9] Class hierarchy: multiple/multilevel/hybrid inheritance and operators\n";
+    PotteryArtifact pot("P1", "Jar", 4500, 3.5, "Delhi", 0.6);
+    CoinArtifact bronze("C1", "Bronze coin", 900, 5.0, "Delhi", "Bronze");
+    AncientCoin maurya("A1", "Punch-marked", 2300, 4.0, "Patna", "Silver", "Maurya");
+    Artifact plain("G1", "Tablet", 3000, 5.0, "Patna");
+
+    const Artifact* base = &maurya;
+    const Artifact* asPot = &pot;
+    const Artifact* asBronze = &bronze;
+    const Artifact* asPlain = &plain;
+    check(dynamic_cast<const CoinArtifact*>(base) != nullptr, "multilevel: AncientCoin is a CoinArtifact is an Artifact");
+    check(dynamic_cast<const Restorable*>(asPot) != nullptr && dynamic_cast<const Restorable*>(asBronze) != nullptr,
+          "multiple inheritance: pottery and coins are also Restorable");
+    check(dynamic_cast<const Restorable*>(asPlain) == nullptr, "a plain Artifact is not Restorable");
+    check(dynamic_cast<const Restorable*>(base) != nullptr, "hybrid: AncientCoin reaches Restorable through CoinArtifact");
+    check(base->typeName() == "Ancient Coin" && base->calculatePriority() > maurya.CoinArtifact::calculatePriority(),
+          "virtual dispatch: AncientCoin priority adds the dynasty bonus");
+    check(bronze.restorationAdvice().find("bronze disease") != string::npos, "bronze coin advice mentions bronze disease");
+    check(maurya.restorationAdvice().find("Document it fully") != string::npos, "AncientCoin extends the coin advice");
+
+    check(plain < pot && pot > plain && !(pot < plain), "operator< / operator> compare by priority");
+    PotteryArtifact samePot("P1", "Other name", 10, 9.0, "X", 0.1);
+    check(pot == samePot && !(pot == plain), "operator== compares IDs");
+    ostringstream os;
+    os << maurya;
+    check(os.str() == "A1 (Ancient Coin, Punch-marked) at Patna", "operator<< prints a one-line summary: " + os.str());
+
+    plain.setLocation("Delhi").setLocation("Kolkata");
+    check(plain.getLocation() == "Kolkata", "setLocation returns *this, so calls chain");
+
+    // serialize -> parse round trip for all four types
+    const vector<const Artifact*> everyType = {asPot, asBronze, base, asPlain};
+    for (const Artifact* a : everyType)
+    {
+        unique_ptr<Artifact> back = parseArtifact(a->serialize());
+        check(back && back->serialize() == a->serialize(), "round trip: " + a->typeName());
+    }
+}
+
+void checkPasswords()
+{
+    cout << "\n[10] Passwords\n";
+    check(sha256Hex("abc") == "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad", "SHA-256(\"abc\") matches the standard test vector");
+    check(sha256Hex("") == "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855", "SHA-256(\"\") matches the standard test vector");
+    string r1 = makePasswordRecord("asd123"), r2 = makePasswordRecord("asd123");
+    check(r1 != r2, "same password, different salt: records differ");
+    check(verifyPassword("asd123", r1) && verifyPassword("asd123", r2), "correct password verifies");
+    check(!verifyPassword("asd124", r1) && !verifyPassword("", r1), "wrong password is rejected");
+    check(r1.find("asd123") == string::npos, "the plain password does not appear in the record");
+    check(!verifyPassword("asd123", "asd123"), "a plain-text record never verifies");
+}
+
+void checkNewTypes()
+{
+    cout << "\n[11] New types: Weapon, Sculpture, Manuscript\n";
+    Weapon w("W1", "Iron Sword", 1000, 4.0, "Delhi", 0.5);
+    Sculpture s("S1", "Stone Lion", 1500, 5.0, "Patna", 0.2);
+    Manuscript m("M1", "Palm Leaf", 600, 6.0, "Kolkata", 0.9);
+    const Artifact* aw = &w;
+    const Artifact* as = &s;
+    const Artifact* am = &m;
+
+    // priority = base + (10 - condition) * index * 5
+    check(fixed2(aw->calculatePriority()) == "54.00", "Weapon priority 39 + 15 = 54.00, got " + fixed2(aw->calculatePriority()));
+    check(fixed2(as->calculatePriority()) == "47.50", "Sculpture priority 42.5 + 5 = 47.50, got " + fixed2(as->calculatePriority()));
+    check(fixed2(am->calculatePriority()) == "43.00", "Manuscript priority 25 + 18 = 43.00, got " + fixed2(am->calculatePriority()));
+    check(aw->typeName() == "Weapon" && as->typeName() == "Sculpture" && am->typeName() == "Manuscript", "typeName labels");
+
+    check(dynamic_cast<const Restorable*>(aw) && dynamic_cast<const Restorable*>(as) && dynamic_cast<const Restorable*>(am),
+          "all three are Restorable (multiple inheritance with Artifact)");
+    check(w.restorationAdvice().find("Heavy rust") != string::npos, "rust 0.5 or more gives the heavy-rust advice");
+    check(Weapon("W2", "x", 10, 5.0, "L", 0.1).restorationAdvice().find("Light rust") != string::npos, "low rust gives the light-rust advice");
+    check(s.restorationAdvice().find("Stable") != string::npos && m.restorationAdvice().find("Advanced decay") != string::npos,
+          "sculpture and manuscript advice follow their index");
+
+    check(w.serialize() == "WEAPON|W1|Iron Sword|1000|4.000000|Delhi|0.500000", "Weapon serializes as WEAPON|... : " + w.serialize());
+    for (const Artifact* a : {aw, as, am})
+    {
+        unique_ptr<Artifact> back = parseArtifact(a->serialize());
+        check(back && back->serialize() == a->serialize() && back->typeName() == a->typeName(), "round trip: " + a->typeName());
+    }
+    check(!parseArtifact("WEAPON|W1|Iron Sword|1000|4.0|Delhi"), "WEAPON line with a missing field is rejected");
+    check(!parseArtifact("SCULPTURE|S1|Lion|1500|5.0|Patna|abc"), "SCULPTURE line with a non-numeric index is rejected");
+    check(!parseArtifact("MANUSCRIPT|M1|Leaf|600|6.0|Kolkata|0.9|extra"), "MANUSCRIPT line with an extra field is rejected");
+
+    check(*as < *aw && *aw > *am && *am < *as, "operators compare priority across the new types");
+
+    // Module 3 sees them like any other type
+    vector<unique_ptr<Artifact>> items;
+    items.push_back(make_unique<Weapon>("W1", "Iron Sword", 1000, 4.0, "Delhi", 0.5));
+    items.push_back(make_unique<Sculpture>("S1", "Stone Lion", 1500, 5.0, "Patna", 0.2));
+    items.push_back(make_unique<Manuscript>("M1", "Palm Leaf", 600, 6.0, "Kolkata", 0.9));
+    items.push_back(make_unique<PotteryArtifact>("P1", "Jar", 1200, 4.0, "Delhi", 0.6));
+    SearchAnalytics sa(items);
+    check(sa.byType("Weapon").size() == 1 && sa.byType("Sculpture").size() == 1 && sa.byType("Manuscript").size() == 1,
+          "filter by type finds each new type");
+    check(sa.byType("Pottery").size() == 1, "the new types do not leak into the Pottery filter");
+    ArtifactView byP = sa.sortedBy(SortKey::Priority, true);
+    check(byP.size() == 4 && byP[0]->getId() == "P1" && byP[1]->getId() == "W1", "sorted by priority across all four types: " + byP[0]->getId() + ", " + byP[1]->getId());
+    check(sa.findById("M1").getName() == "Palm Leaf", "hash lookup finds a Manuscript");
+}
+
 int main()
 {
     const int N = 5000;
-    cout << "===== Module 3 harness =====\n";
+    cout << "===== Module 3 / core harness =====\n";
     writeLargeDataFile("harness_artifacts.txt", N);
     ArtifactStore store("harness_artifacts.txt");
     store.load();
@@ -305,6 +478,10 @@ int main()
     checkExceptions(store);
     checkGraph();
     checkMovementLog();
+    checkPureCCore();
+    checkHierarchyAndOperators();
+    checkPasswords();
+    checkNewTypes();
 
     cout << "\n===== " << passed << " passed, " << failed << " failed =====\n";
     return failed == 0 ? 0 : 1;
