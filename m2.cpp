@@ -1,147 +1,236 @@
-// m2.cpp - Artifact class hierarchy + save/load support (NO main here; used by m1.cpp)
-#pragma once
-#include <iostream>
-#include <string>
+// m2.cpp - Artifact class hierarchy + save/load support (NO main here)
+#include "m2.h"
 #include <vector>
-#include <memory>
 using namespace std;
 
-class Artifact {
-protected:
-    string id, name, currentLocation;
-    int estimatedAge;
-    double conditionScore;
+// ---------------- Artifact ----------------
+Artifact::Artifact(const string& id, const string& name, int age,
+                   double condition, const string& loc)
+    : id(id), name(name), currentLocation(loc),
+      estimatedAge(age), conditionScore(condition) {}
 
-    // Fields common to every type, in save-file order
-    string baseFields() const {
-        return id + "|" + name + "|" + to_string(estimatedAge) + "|" +
-               to_string(conditionScore) + "|" + currentLocation;
-    }
-public:
-    Artifact(const string& id, const string& name, int age,
-             double condition, const string& loc)
-        : id(id), name(name), currentLocation(loc),
-          estimatedAge(age), conditionScore(condition) {}
+string Artifact::baseFields() const
+{
+    return id + "|" + name + "|" + to_string(estimatedAge) + "|" +
+           to_string(conditionScore) + "|" + currentLocation;
+}
 
-    virtual ~Artifact() {}
+Artifact& Artifact::setLocation(const string& loc)
+{
+    this->currentLocation = loc;
+    return *this;
+}
 
-    const string& getId() const { return id; }
-    const string& getName() const { return name; }
-    const string& getLocation() const { return currentLocation; }
-    void setLocation(const string& loc) { currentLocation = loc; }   // used by Module 4
+// Base urgency: condition dominates (0..40), age adds 1.5 points per century
+double Artifact::calculatePriority() const
+{
+    return (10.0 - conditionScore) * 4.0 + (estimatedAge / 100.0) * 1.5;
+}
 
-    // Read-only access for Module 3 (search, sorting, reports)
-    const string& getName() const { return name; }
-    int getAge() const { return estimatedAge; }
-    double getCondition() const { return conditionScore; }
-    const string& getLocation() const { return currentLocation; }
+void Artifact::display() const
+{
+    cout << "ID: " << id << " | Name: " << name
+         << " | Age: " << estimatedAge << " yrs"
+         << " | Condition: " << conditionScore
+         << " | Location: " << currentLocation << "\n";
+}
 
-    // Type label used by Module 3's "filter by type"
-    virtual string typeName() const { return "Artifact"; }
+// ---------------- operators ----------------
+bool operator<(const Artifact& a, const Artifact& b)  { return a.calculatePriority() < b.calculatePriority(); }
+bool operator>(const Artifact& a, const Artifact& b)  { return b < a; }
+bool operator==(const Artifact& a, const Artifact& b) { return a.getId() == b.getId(); }
 
-    // Module 3's report table prints one row per artifact (defined in m4.cpp)
-    friend void printReportRow(ostream& out, const Artifact& a);
+ostream& operator<<(ostream& out, const Artifact& a)
+{
+    out << a.getId() << " (" << a.typeName() << ", " << a.getName() << ") at " << a.getLocation();
+    return out;
+}
 
-    virtual double calculatePriority() const {
-        return (10.0 - conditionScore) * 4.0 + (estimatedAge / 100.0) * 1.5;
-    }
+// ---------------- PotteryArtifact ----------------
+PotteryArtifact::PotteryArtifact(const string& id, const string& name, int age,
+                                 double condition, const string& loc, double porosity)
+    : Artifact(id, name, age, condition, loc), porosityIndex(porosity) {}
 
-    virtual void display() const {
-        cout << "ID: " << id << " | Name: " << name
-             << " | Age: " << estimatedAge << " yrs"
-             << " | Condition: " << conditionScore
-             << " | Location: " << currentLocation << "\n";
-    }
+double PotteryArtifact::calculatePriority() const
+{
+    double baseScore = Artifact::calculatePriority();
+    double porosityPenalty = (10.0 - conditionScore) * porosityIndex * 5.0;
+    return baseScore + porosityPenalty;
+}
 
-    // One line for the save file
-    virtual string serialize() const { return "ARTIFACT|" + baseFields(); }
-};
+void PotteryArtifact::display() const
+{
+    Artifact::display();
+    cout << "  Type: Pottery | Porosity: " << porosityIndex << "\n";
+}
 
-class PotteryArtifact : public Artifact {
-private:
-    double porosityIndex;
-public:
-    PotteryArtifact(const string& id, const string& name, int age,
-                    double condition, const string& loc, double porosity)
-        : Artifact(id, name, age, condition, loc),
-          porosityIndex(porosity) {}
+string PotteryArtifact::serialize() const
+{
+    return "POTTERY|" + baseFields() + "|" + to_string(porosityIndex);
+}
 
-    double calculatePriority() const override {
-        double baseScore = Artifact::calculatePriority();
-        double porosityPenalty = (10.0 - conditionScore) * porosityIndex * 5.0;
-        return baseScore + porosityPenalty;
-    }
+string PotteryArtifact::restorationAdvice() const
+{
+    if (porosityIndex >= 0.5)
+        return "Porous body: keep humidity steady, consolidate before handling, no wet cleaning.";
+    return "Dense body: dry-clean with a soft brush and check for salt crystals.";
+}
 
-    string typeName() const override { return "Pottery"; }
+// ---------------- CoinArtifact ----------------
+CoinArtifact::CoinArtifact(const string& id, const string& name, int age,
+                           double condition, const string& loc, const string& metal)
+    : Artifact(id, name, age, condition, loc), metalComposition(metal) {}
 
-    void display() const override {
-        Artifact::display();
-        cout << "  Type: Pottery | Porosity: " << porosityIndex << "\n";
-    }
+double CoinArtifact::calculatePriority() const
+{
+    double baseScore = Artifact::calculatePriority();
+    // Oxidizable metals need urgent attention
+    if (metalComposition == "Bronze" || metalComposition == "Copper")
+        baseScore += 12.0;
+    return baseScore;
+}
 
-    string serialize() const override {
-        return "POTTERY|" + baseFields() + "|" + to_string(porosityIndex);
-    }
-};
+void CoinArtifact::display() const
+{
+    Artifact::display();
+    cout << "  Type: Coin | Metal: " << metalComposition << "\n";
+}
 
-class CoinArtifact : public Artifact {
-protected:
-    string metalComposition; // Gold, Silver, Bronze, Copper
-public:
-    CoinArtifact(const string& id, const string& name, int age,
-                 double condition, const string& loc, const string& metal)
-        : Artifact(id, name, age, condition, loc), metalComposition(metal) {}
+string CoinArtifact::serialize() const
+{
+    return "COIN|" + baseFields() + "|" + metalComposition;
+}
 
-    double calculatePriority() const override {
-        double baseScore = Artifact::calculatePriority();
-        // Oxidizable metals need urgent attention
-        if (metalComposition == "Bronze" || metalComposition == "Copper")
-            baseScore += 12.0;
-        return baseScore;
-    }
+string CoinArtifact::restorationAdvice() const
+{
+    if (metalComposition == "Bronze" || metalComposition == "Copper")
+        return "Check for bronze disease (green powdery spots); store dry, away from PVC holders.";
+    if (metalComposition == "Silver")
+        return "Use anti-tarnish storage; never polish.";
+    return "Stable metal: handle by the edges and keep in an inert holder.";
+}
 
-    string typeName() const override { return "Coin"; }
+// ---------------- AncientCoin ----------------
+AncientCoin::AncientCoin(const string& id, const string& name, int age,
+                         double condition, const string& loc,
+                         const string& metal, const string& dynasty)
+    : CoinArtifact(id, name, age, condition, loc, metal), dynasty(dynasty) {}
 
-    void display() const override {
-        Artifact::display();
-        cout << "  Type: Coin | Metal: " << metalComposition << "\n";
-    }
+double AncientCoin::calculatePriority() const
+{
+    double coinScore = CoinArtifact::calculatePriority();
+    // Extra urgency for high-rarity dynasties
+    coinScore += (dynasty == "Maurya" || dynasty == "Gupta") ? 20.0 : 10.0;
+    return coinScore;
+}
 
-    string serialize() const override {
-        return "COIN|" + baseFields() + "|" + metalComposition;
-    }
-};
+void AncientCoin::display() const
+{
+    CoinArtifact::display();
+    cout << "  Subtype: Ancient Coin | Dynasty: " << dynasty << "\n";
+}
 
-class AncientCoin : public CoinArtifact {
-private:
-    string dynasty;
-public:
-    AncientCoin(const string& id, const string& name, int age,
-                double condition, const string& loc,
-                const string& metal, const string& dynasty)
-        : CoinArtifact(id, name, age, condition, loc, metal),
-          dynasty(dynasty) {}
+string AncientCoin::serialize() const
+{
+    return "ANCIENT|" + baseFields() + "|" + metalComposition + "|" + dynasty;
+}
 
-    double calculatePriority() const override {
-        double coinScore = CoinArtifact::calculatePriority();
-        // Extra urgency for high-rarity dynasties
-        coinScore += (dynasty == "Maurya" || dynasty == "Gupta") ? 20.0 : 10.0;
-        return coinScore;
-    }
+string AncientCoin::restorationAdvice() const
+{
+    return CoinArtifact::restorationAdvice() + " Document it fully before any treatment.";
+}
 
-    string typeName() const override { return "Ancient Coin"; }
+// ---------------- Weapon ----------------
+Weapon::Weapon(const string& id, const string& name, int age,
+               double condition, const string& loc, double rust)
+    : Artifact(id, name, age, condition, loc), rustIndex(rust) {}
 
-    void display() const override {
-        CoinArtifact::display();
-        cout << "  Subtype: Ancient Coin | Dynasty: " << dynasty << "\n";
-    }
+double Weapon::calculatePriority() const
+{
+    double baseScore = Artifact::calculatePriority();
+    double penalty = (10.0 - conditionScore) * rustIndex * 5.0;
+    return baseScore + penalty;
+}
 
-    string serialize() const override {
-        return "ANCIENT|" + baseFields() + "|" + metalComposition + "|" + dynasty;
-    }
-};
+void Weapon::display() const
+{
+    Artifact::display();
+    cout << "  Type: Weapon | Rust: " << rustIndex << "\n";
+}
 
-// Rebuild an artifact from one save-file line. Returns nullptr if malformed.
+string Weapon::serialize() const
+{
+    return "WEAPON|" + baseFields() + "|" + to_string(rustIndex);
+}
+
+string Weapon::restorationAdvice() const
+{
+    if (rustIndex >= 0.5)
+        return "Heavy rust: keep it dry, stabilise the corrosion before any cleaning, never polish.";
+    return "Light rust: dry-clean, apply a thin protective wax and re-check for active corrosion.";
+}
+
+// ---------------- Sculpture ----------------
+Sculpture::Sculpture(const string& id, const string& name, int age,
+                     double condition, const string& loc, double crack)
+    : Artifact(id, name, age, condition, loc), crackIndex(crack) {}
+
+double Sculpture::calculatePriority() const
+{
+    double baseScore = Artifact::calculatePriority();
+    double penalty = (10.0 - conditionScore) * crackIndex * 5.0;
+    return baseScore + penalty;
+}
+
+void Sculpture::display() const
+{
+    Artifact::display();
+    cout << "  Type: Sculpture | Crack Index: " << crackIndex << "\n";
+}
+
+string Sculpture::serialize() const
+{
+    return "SCULPTURE|" + baseFields() + "|" + to_string(crackIndex);
+}
+
+string Sculpture::restorationAdvice() const
+{
+    if (crackIndex >= 0.5)
+        return "Cracked: support it before moving, never lift by projecting parts, consolidate cracks first.";
+    return "Stable: dust gently and keep monitoring the existing cracks.";
+}
+
+// ---------------- Manuscript ----------------
+Manuscript::Manuscript(const string& id, const string& name, int age,
+                       double condition, const string& loc, double decay)
+    : Artifact(id, name, age, condition, loc), decayIndex(decay) {}
+
+double Manuscript::calculatePriority() const
+{
+    double baseScore = Artifact::calculatePriority();
+    double penalty = (10.0 - conditionScore) * decayIndex * 5.0;
+    return baseScore + penalty;
+}
+
+void Manuscript::display() const
+{
+    Artifact::display();
+    cout << "  Type: Manuscript | Decay Index: " << decayIndex << "\n";
+}
+
+string Manuscript::serialize() const
+{
+    return "MANUSCRIPT|" + baseFields() + "|" + to_string(decayIndex);
+}
+
+string Manuscript::restorationAdvice() const
+{
+    if (decayIndex >= 0.5)
+        return "Advanced decay: handle only on flat supports, limit light and damp, digitise before further handling.";
+    return "Stable: keep it in an acid-free enclosure, away from light and damp.";
+}
+
+// ---------------- parsing ----------------
 unique_ptr<Artifact> parseArtifact(const string& line)
 {
     vector<string> f;
@@ -166,6 +255,12 @@ unique_ptr<Artifact> parseArtifact(const string& line)
             return make_unique<CoinArtifact>(f[1], f[2], age, cond, f[5], f[6]);
         if (type == "ANCIENT" && f.size() == 8)
             return make_unique<AncientCoin>(f[1], f[2], age, cond, f[5], f[6], f[7]);
+        if (type == "WEAPON" && f.size() == 7)
+            return make_unique<Weapon>(f[1], f[2], age, cond, f[5], stod(f[6]));
+        if (type == "SCULPTURE" && f.size() == 7)
+            return make_unique<Sculpture>(f[1], f[2], age, cond, f[5], stod(f[6]));
+        if (type == "MANUSCRIPT" && f.size() == 7)
+            return make_unique<Manuscript>(f[1], f[2], age, cond, f[5], stod(f[6]));
         if (type == "ARTIFACT" && f.size() == 6)
             return make_unique<Artifact>(f[1], f[2], age, cond, f[5]);
     }
