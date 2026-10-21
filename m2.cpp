@@ -101,7 +101,7 @@ string CoinArtifact::serialize() const
 {
     return "COIN|" + baseFields() + "|" + metalComposition;
 }
-
+// Returns conservation handling instructions tailored to metal type
 string CoinArtifact::restorationAdvice() const
 {
     if (metalComposition == "Bronze" || metalComposition == "Copper")
