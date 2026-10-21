@@ -99,3 +99,9 @@ Movement menu: 1 Move  2 History  3 Full log  4 Undo last move  5 Restoration qu
 - The priority formula's numbers are ours; only the Low/Medium/High banding idea comes from
   the English Heritage audit.
 - Single operator, flat files, a few thousand records.
+
+## Development Notes
+
+- The project uses C and C++17.
+- Build and test instructions are provided above.
+- Review changes before committing.
