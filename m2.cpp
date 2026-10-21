@@ -8,7 +8,7 @@ using namespace std;
 Artifact::Artifact(const string& id, const string& name, int age,
                    double condition, const string& loc)
     : id(id), name(name), currentLocation(loc),
-      estimatedAge(age), conditionScore(condition) {}
+      estimatedAge(age), conditionScore(condition < 1.0 ? 1.0 : (condition > 10.0 ? 10.0 : condition)) {}
 
 string Artifact::baseFields() const
 {
