@@ -46,7 +46,7 @@ ostream& operator<<(ostream& out, const Artifact& a)
     out << a.getId() << " (" << a.typeName() << ", " << a.getName() << ") at " << a.getLocation();
     return out;
 }
-
+// Calculate restoration urgency weighting condition decay against porosity
 // ---------------- PotteryArtifact ----------------
 PotteryArtifact::PotteryArtifact(const string& id, const string& name, int age,
                                  double condition, const string& loc, double porosity)
