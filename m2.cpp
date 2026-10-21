@@ -86,7 +86,7 @@ double CoinArtifact::calculatePriority() const
 {
     double baseScore = Artifact::calculatePriority();
     // Oxidizable metals need urgent attention
-    if (metalComposition == "Bronze" || metalComposition == "Copper")
+  if (metalComposition == "Bronze" || metalComposition == "bronze" || metalComposition == "Copper" || metalComposition == "copper")
         baseScore += 12.0;
     return baseScore;
 }
