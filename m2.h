@@ -27,7 +27,7 @@ public:
     virtual ~Restorable() {}
     virtual string restorationAdvice() const = 0;
 };
-
+// Base class representing a museum artifact with core tracking attributes
 class Artifact {
 protected:
     string id, name, currentLocation;
