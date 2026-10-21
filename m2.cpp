@@ -1,3 +1,4 @@
+// Module 2 Implementation - Artifact logic & priority calculations
 // m2.cpp - Artifact class hierarchy + save/load support (NO main here)
 #include "m2.h"
 #include <vector>
