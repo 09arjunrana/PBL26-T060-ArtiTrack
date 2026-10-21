@@ -105,3 +105,9 @@ Movement menu: 1 Move  2 History  3 Full log  4 Undo last move  5 Restoration qu
 - The project uses C and C++17.
 - Build and test instructions are provided above.
 - Review changes before committing.
+
+## Testing
+
+Run the project's tests using `make test`.
+Ensure the required compiler tools are installed
+before building and testing the application.
