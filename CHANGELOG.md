@@ -10,3 +10,4 @@ This file records documentation updates for ArtiTrack.
 - Documented data formats and application features.
 - Added troubleshooting guidance.
 - Added contribution guidelines.
+- Added class hierarchy documentation and inline comments across Module 2 (m2.h, m2.cpp).
