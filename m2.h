@@ -70,7 +70,7 @@ bool operator<(const Artifact& a, const Artifact& b);     // less urgent than
 bool operator>(const Artifact& a, const Artifact& b);     // more urgent than
 bool operator==(const Artifact& a, const Artifact& b);    // same ID = same artifact
 ostream& operator<<(ostream& out, const Artifact& a);     // one-line summary
-
+// Derived class incorporating material porosity for fragile ceramics
 class PotteryArtifact : public Artifact, public Restorable {
 private:
     double porosityIndex;
